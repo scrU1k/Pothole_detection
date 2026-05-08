@@ -9,15 +9,14 @@ from ultralytics import YOLO
 pytorch_model = 'best.pt'
 openvino_model = 'best_openvino_model/'
 
-# Automatically optimize the YOLO26 model for Intel hardware on the first run
+# Automatically optimize the model for Intel hardware if not done yet
 if not os.path.exists(openvino_model):
     if not os.path.exists(pytorch_model):
         print(f"ERROR: Cannot find {pytorch_model}. Make sure it is in this folder.")
         exit()
         
-    print("First run detected. Converting YOLO26 model to Intel OpenVINO format...")
+    print("First run detected. Converting model to Intel OpenVINO format...")
     temp_model = YOLO(pytorch_model)
-    # YOLO26's DFL removal makes this export highly efficient
     temp_model.export(format='openvino', imgsz=640)
     print("Optimization complete!")
 
@@ -27,64 +26,86 @@ model = YOLO(openvino_model)
 
 # --- 2. GUI SETUP ---
 
-# Initialize Tkinter but hide the main, empty window
-# We only want to use its native file dialog box
+# Initialize Tkinter but hide the main window
 root = tk.Tk()
 root.withdraw() 
-# Keeps the dialog window on top of other apps
 root.attributes('-topmost', True) 
 
 # --- 3. MAIN EXECUTION LOOP ---
 
 while True:
     print("\n" + "="*30)
-    print("POTHOLE DETECTION SYSTEM")
+    print("POTHOLE BATCH PROCESSOR")
     print("="*30)
-    user_input = input("Press 'Enter' to upload an image, or type 'q' to quit: ")
-    
+    user_input = input("Press 'Enter' to select a FOLDER of images, 'I' to enter a SINGLE IMAGE or type 'q' to QUIT: ")
+
+    conf = 0.25     # Confidence is 0.25, i.e it will mark all those potholes its is 25%+ sure about
+
     if user_input.lower() == 'q':
         break
-        
-    print("Opening file explorer...")
     
-    # Open the native OS file picker
-    file_path = filedialog.askopenfilename(
-        title="Select Road Image to Test",
-        filetypes=[("Image Files", "*.jpg *.jpeg *.png *.bmp *.webp")]
-    )
     
-    # If the user selected a file (and didn't hit cancel)
-    if file_path:
-        filename = os.path.basename(file_path)
-        print(f"\nProcessing: {filename}")
+    # --- OPTION 2: SINGLE IMAGE PROCESSING ---
+    elif user_input.lower() == 'i':
+        print("\nOpening file explorer for Single Image...")
         
-        # Load the image using OpenCV
-        image = cv2.imread(file_path)
-        if image is None:
-            print("ERROR: Could not read image file. It might be corrupted.")
-            continue
+        file_path = filedialog.askopenfilename(
+            title="Select a Single Road Image to Test",
+            filetypes=[("Image Files", "*.jpg *.jpeg *.png *.bmp *.webp")]
+        )
+        
+        if file_path:
+            filename = os.path.basename(file_path)
+            print(f"Processing: {filename}")
             
-        # Run the YOLO26 detection
-        # conf=0.25 means it will draw boxes for anything it is 25%+ sure is a pothole
-        results = model(image, conf=0.25)
+            image = cv2.imread(file_path)
+            if image is None:
+                print("ERROR: Could not read image file. It might be corrupted.")
+                continue
+                
+            # Run YOLO detection for a single image
+            results = list(model(image, conf))
+            annotated_image = results[0].plot()
+            
+            # Display popup window
+            window_name = f"Result: {filename} (Press ANY KEY to close)"
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            cv2.imshow(window_name, annotated_image)
+            
+            print("Detection complete. Look at the pop-up window.")
+            print("Press ANY KEY while the image window is active to close it.")
+            
+            cv2.waitKey(0) 
+            cv2.destroyAllWindows()
+        else:
+            print("No file was selected.")
+    
+    # --- OPTION 3: FOLDER BATCH PROCESSING ---
+    # An empty string '' means the user just pressed the Enter key
+    elif user_input == '':
+        print("\nOpening file explorer for Folder Batch Processing...")
         
-        # Plot the bounding boxes onto the image
-        annotated_image = results[0].plot()
+        folder_path = filedialog.askdirectory(
+            title="Select Folder Containing Road Images"
+        )
         
-        # Display the result in a new window
-        window_name = f"Result: {filename} (Press ANY KEY on your keyboard to close)"
-        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-        cv2.imshow(window_name, annotated_image)
-        
-        print("Detection complete. Look at the pop-up window.")
-        print("Press ANY KEY while the image window is active to close it.")
-        
-        # Pause the script until the user presses a key
-        cv2.waitKey(0) 
-        cv2.destroyAllWindows()
-        
+        if folder_path:
+            print(f"Processing all images in: {folder_path}")
+            print("Please wait. Bounding boxes are being drawn and saved...")
+            
+            # Run YOLO batch prediction and save quietly
+            results = model.predict(source=folder_path, conf=0.35, save=True)
+            
+            print("\n" + "*"*40)
+            print("BATCH PROCESSING COMPLETE!")
+            print("To view your results, open the 'runs/detect/predict' folder in your project directory.")
+            print("*"*40)
+        else:
+            print("No folder was selected.")
+            
+    # --- CATCH INVALID INPUT ---
     else:
-        print("\nNo file was selected.")
+        print("\nInvalid input. Please just press 'Enter', type 'I', or type 'q'.")
 
 # Clean up before shutting down
 root.destroy()
